@@ -27,8 +27,17 @@ Depois, **volte aqui** e use o **CS2ResChanger** para não precisar editar valor
 
 ## Download
 
-- Baixe o `.exe` em **Releases**: `CS2ResChanger.exe`.
+- Baixe o `.zip` da aba **Releases**:
+  👉 [Clique aqui para acessar as Releases](https://github.com/luanzio/cs2ResChanger/releases)
 
+- Extraia tudo e rode `CS2ResChanger.exe`.
+
+**Importante**: se o Windows Defender acusar o `.exe` como vírus, isso é um **falso positivo** (por ser novo e não assinado). Veja abaixo como contornar:
+
+### Se o antivírus bloquear:
+- Extraia o `.zip` em uma pasta
+- Vá em **Segurança do Windows** → **Vírus e ameaças** → **Gerenciar configurações** → **Exclusões**
+- Adicione a pasta extraída como exceção
 ---
 
 ## Integração: NirCmd + PowerShell
@@ -52,8 +61,8 @@ Depois, **volte aqui** e use o **CS2ResChanger** para não precisar editar valor
 }
 ```
 
-### Script PowerShell recomendado (`cs2-resolucao.ps1`)
-Você deve trocar o script do vídeo por **este** ele recarrega o JSON antes de aplicar/restaurar e funciona dinamicamente com as resoluções setadas:
+### Script PowerShell (`cs2-resolucao.ps1`)
+Você deve trocar o script do vídeo por **este**, ele recarrega o JSON antes de aplicar/restaurar e funciona dinamicamente com as resoluções setadas sem precisar reiniciar:
 
 ```powershell
 $nirCmd = "C:\nircmd\nircmd.exe"
