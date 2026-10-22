@@ -1,5 +1,34 @@
 # Changelog
 
+## 2.1.2 — 2026-10-22
+
+### Ligar o vibrance no app não fazia efeito nenhum
+
+A NVAPI era carregada **só no pré-voo** do daemon, e só se o
+`cs2-config.json` já trouxesse `vibranceEnabled: true` naquele instante. O
+daemon sobe no login e fica semanas no ar; quem ligasse a chave no app depois
+disso ficava com `VibranceReady = $false` para sempre, e todas as chamadas de
+`Set-Vibrance` abortavam na primeira linha, sem escrever nada no log.
+
+Na prática: a resolução trocava normalmente, o vibrance nunca, e não havia
+pista nenhuma do motivo.
+
+Isso contrariava a regra central do projeto — mudança no app vale no próximo
+jogo, sem reiniciar nada.
+
+- A NVAPI passou a ser carregada **sob demanda**, dentro de `Set-Vibrance`
+- O pré-voo deixou de duplicar essa lógica; agora só chama `Set-Vibrance`
+- Quando a NVAPI não responde, fica registrado uma vez no log em vez de
+  falhar em silêncio
+
+### Diagnóstico
+
+- `Set-Resolution` agora registra quando **não consegue ler** o modo para
+  conferir. Antes, esse caminho não escrevia nada: se o modo não aplicasse e
+  a leitura também falhasse, o log ficava idêntico ao de um sucesso.
+
+---
+
 ## 2.1.1 — 2026-10-22
 
 ### Os avisos flutuantes empilhavam e não sumiam

@@ -45,8 +45,9 @@ $GameProcess = 'cs2'
 $MaxLogKB    = 256
 $MutexName   = 'Local\cs2-resolucao-v2'
 
-# Set-StrictMode reclama de variavel nao definida, entao ja nasce declarada
+# Set-StrictMode reclama de variavel nao definida, entao ja nascem declaradas
 $script:VibranceReady = $false
+$script:VibranceWarned = $false
 
 function Write-Log {
     param([string]$Message, [string]$Level = 'INFO')
@@ -297,7 +298,11 @@ function Set-Resolution {
     Start-Sleep -Milliseconds 400
 
     $actual = Get-CurrentMode $Monitor
-    if ($actual -and ($actual.W -ne $W -or $actual.H -ne $H)) {
+    if (-not $actual) {
+        # sem leitura nao da para confirmar nada; registrar evita o caso em
+        # que o modo nao aplicou e o log nao mostra absolutamente nada
+        Write-Log "nao consegui ler o modo de $Monitor para conferir" 'WARN'
+    } elseif ($actual.W -ne $W -or $actual.H -ne $H) {
         Write-Log "modo nao aplicou ($($actual.W)x$($actual.H)), tentando de novo" 'WARN'
         & $NirCmd setdisplay "monitor:$Monitor" $W $H $Bpp $Hz -updatereg
         Start-Sleep -Milliseconds 600
@@ -310,11 +315,27 @@ function Set-Resolution {
 function Set-Vibrance {
     param($Cfg, [string]$Field)
 
-    if (-not $script:VibranceReady) { return }
     if (-not (Get-CfgBool $Cfg 'vibranceEnabled' $false)) { return }
 
     $level = Get-CfgInt $Cfg $Field -1
     if ($level -lt 0) { return }
+
+    # Carga tardia da NVAPI. O daemon sobe uma vez e fica semanas no ar; se a
+    # inicializacao so acontecesse no pre-voo, ligar o vibrance no app com o
+    # daemon ja rodando nao teria efeito nenhum ate reiniciar o script, o que
+    # contraria a regra do projeto de que mudanca no app vale no proximo jogo.
+    if (-not $script:VibranceReady) {
+        $script:VibranceReady = [CS2Nv]::Init()
+        if ($script:VibranceReady) {
+            Write-Log 'NVAPI carregada sob demanda'
+        } else {
+            if (-not $script:VibranceWarned) {
+                Write-Log 'vibrance ligado no config, mas a NVAPI nao respondeu' 'WARN'
+                $script:VibranceWarned = $true
+            }
+            return
+        }
+    }
 
     $device = Resolve-Device $Cfg.monitor
     $applied = [CS2Nv]::SetLevel($device, $level)
@@ -355,18 +376,10 @@ try {
     $cfg = Get-Config
     Write-Log 'iniciado'
 
-    if (Get-CfgBool $cfg 'vibranceEnabled' $false) {
-        $script:VibranceReady = [CS2Nv]::Init()
-        if ($script:VibranceReady) {
-            $dev = Resolve-Device $cfg.monitor
-            Write-Log ("vibrance ligado em {0} (atual {1})" -f $dev, [CS2Nv]::GetLevel($dev))
-            # o driver guarda o DVC entre sessoes, entao se a maquina caiu
-            # no meio da partida o nivel de jogo pode ter sobrevivido
-            Set-Vibrance $cfg 'vibranceDesktop'
-        } else {
-            Write-Log 'vibrance pedido no config, mas a NVAPI nao respondeu; seguindo sem ele' 'WARN'
-        }
-    }
+    # o driver guarda o DVC entre sessoes, entao se a maquina caiu no meio da
+    # partida o nivel de jogo pode ter sobrevivido ao boot. Set-Vibrance ja
+    # checa se esta ligado e carrega a NVAPI por conta propria.
+    Set-Vibrance $cfg 'vibranceDesktop'
 } catch {
     Write-Log "falha no pre-flight: $($_.Exception.Message)" 'ERRO'
     if ($mutex) { try { $mutex.ReleaseMutex() } catch { } }

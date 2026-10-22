@@ -3,7 +3,7 @@
 Mantém a resolução do **desktop** igual à do **CS2** enquanto você joga, e devolve
 a resolução normal quando o jogo fecha. O alt-tab passa a ser instantâneo.
 
-![versão](https://img.shields.io/badge/vers%C3%A3o-2.1.1-f5a524)
+![versão](https://img.shields.io/badge/vers%C3%A3o-2.1.2-f5a524)
 ![windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078d4)
 
 ---
