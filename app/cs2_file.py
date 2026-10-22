@@ -1,92 +1,200 @@
+"""Leitura e escrita do cs2_video.txt.
+
+Nenhuma funcao daqui abre janela: todas devolvem (ok, mensagem) e quem
+chama decide como mostrar. A GUI mostra em toast.
+"""
+
 import os
 import re
-from tkinter import messagebox
+
+NOT_FOUND = "cs2_video.txt não encontrado. Abra o CS2 ao menos uma vez."
+
+_RE_W = r'"setting\.defaultres"\s+"(\d+)"'
+_RE_H = r'"setting\.defaultresheight"\s+"(\d+)"'
+_RE_FOCUS = r'"setting\.fullscreen_min_on_focus_loss"\s+"(\d+)"'
+
+
+def _steam_roots():
+    """Candidatos a raiz do Steam, do mais confiável para o menos.
+
+    A versão antiga olhava só Program Files (x86), o que quebra em quem
+    instalou o Steam em outro disco.
+    """
+    roots = []
+
+    try:
+        import winreg
+        for hive, key, name in (
+            (winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam", "SteamPath"),
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Valve\Steam", "InstallPath"),
+            (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Valve\Steam", "InstallPath"),
+        ):
+            try:
+                with winreg.OpenKey(hive, key) as k:
+                    val, _ = winreg.QueryValueEx(k, name)
+                    if val:
+                        roots.append(os.path.normpath(val))
+            except OSError:
+                continue
+    except Exception:
+        pass
+
+    roots.append(r"C:\Program Files (x86)\Steam")
+    roots.append(r"C:\Program Files\Steam")
+
+    out = []
+    for r in roots:
+        if r and r not in out and os.path.isdir(r):
+            out.append(r)
+    return out
+
 
 def find_video_cfg():
-    steam_path = r"C:\\Program Files (x86)\\Steam\\userdata"
-    if not os.path.exists(steam_path):
-        return None
-    for user_id in os.listdir(steam_path):
-        cfg_path = os.path.join(steam_path, user_id, "730", "local", "cfg", "cs2_video.txt")
-        if os.path.exists(cfg_path):
-            return cfg_path
-    return None
+    """Caminho do cs2_video.txt, ou None.
 
-def _read_file_text(path):
-    with open(path, 'r', encoding='utf-8') as f:
+    Quando ha mais de uma conta Steam na maquina, usa a mais recente.
+    """
+    found = []
+    for root in _steam_roots():
+        userdata = os.path.join(root, "userdata")
+        if not os.path.isdir(userdata):
+            continue
+        try:
+            users = os.listdir(userdata)
+        except OSError:
+            continue
+        for user_id in users:
+            path = os.path.join(userdata, user_id, "730", "local", "cfg", "cs2_video.txt")
+            if os.path.exists(path):
+                try:
+                    found.append((os.path.getmtime(path), path))
+                except OSError:
+                    found.append((0, path))
+    if not found:
+        return None
+    found.sort(reverse=True)
+    return found[0][1]
+
+
+def _read(path):
+    with open(path, "r", encoding="utf-8") as f:
         return f.read()
 
-def _write_file_text(path, content):
-    with open(path, 'w', encoding='utf-8') as f:
+
+def _write(path, content):
+    with open(path, "w", encoding="utf-8") as f:
         f.write(content)
 
-def _get_focus_loss_value(content: str) -> str | None:
-    m = re.search(r'"setting\.fullscreen_min_on_focus_loss"\s+"(\d+)"', content)
-    return m.group(1) if m else None
+
+def _unlock(path):
+    try:
+        os.chmod(path, 0o666)
+    except OSError:
+        pass
+
+
+def _apply_lock(path, focus_value):
+    """focus_loss 0 e o estado que o jogador quer manter, entao o arquivo
+    volta a somente-leitura para o CS2 não reescrever por cima."""
+    try:
+        os.chmod(path, 0o444 if focus_value == "0" else 0o666)
+    except OSError:
+        pass
+
 
 def get_current_resolution_from_cs2():
-    file_path = find_video_cfg()
-    if not file_path:
+    path = find_video_cfg()
+    if not path:
         return None, None
-    content = _read_file_text(file_path)
-    width_match = re.search(r'"setting\.defaultres"\s+"(\d+)"', content)
-    height_match = re.search(r'"setting\.defaultresheight"\s+"(\d+)"', content)
-    if width_match and height_match:
-        return width_match.group(1), height_match.group(1)
+    try:
+        content = _read(path)
+    except OSError:
+        return None, None
+    w, h = re.search(_RE_W, content), re.search(_RE_H, content)
+    if w and h:
+        return w.group(1), h.group(1)
     return None, None
 
+
+def read_focus_loss():
+    """(valor, somente_leitura). valor e '0', '1' ou None se não existir."""
+    path = find_video_cfg()
+    if not path:
+        return None, False
+    try:
+        content = _read(path)
+    except OSError:
+        return None, False
+    m = re.search(_RE_FOCUS, content)
+    readonly = not os.access(path, os.W_OK)
+    return (m.group(1) if m else None), readonly
+
+
 def change_resolution(new_width, new_height):
-    file_path = find_video_cfg()
-    if not file_path:
-        messagebox.showerror("Erro", "cs2_video.txt não encontrado. Abra o CS2 ao menos uma vez.")
-        return False
+    path = find_video_cfg()
+    if not path:
+        return False, NOT_FOUND
+
+    _unlock(path)
     try:
-        os.chmod(file_path, 0o666)
-    except:
-        pass
-    content = _read_file_text(file_path)
-    focus_val = _get_focus_loss_value(content)
-    if focus_val not in ("0", "1"):
-        focus_val = "0"
-    content = re.sub(r'("setting\.defaultres"\s+"\d+")', f'"setting.defaultres" "{new_width}"', content)
-    content = re.sub(r'("setting\.defaultresheight"\s+"\d+")', f'"setting.defaultresheight" "{new_height}"', content)
-    _write_file_text(file_path, content)
+        content = _read(path)
+    except OSError as exc:
+        return False, "Falha ao ler cs2_video.txt: %s" % exc
+
+    focus = re.search(_RE_FOCUS, content)
+    focus_val = focus.group(1) if focus and focus.group(1) in ("0", "1") else "0"
+
+    content, n_w = re.subn(_RE_W, '"setting.defaultres" "%s"' % new_width, content)
+    content, n_h = re.subn(_RE_H, '"setting.defaultresheight" "%s"' % new_height, content)
+    if not (n_w and n_h):
+        _apply_lock(path, focus_val)
+        return False, "cs2_video.txt sem as chaves de resolução. Abra o CS2 uma vez."
+
     try:
-        os.chmod(file_path, 0o444 if focus_val == "0" else 0o666)
-    except:
-        pass
-    messagebox.showinfo("Sucesso", f"Resolução do CS2 alterada para {new_width}x{new_height}.")
-    return True
+        _write(path, content)
+    except OSError as exc:
+        return False, "Falha ao gravar cs2_video.txt: %s" % exc
+    _apply_lock(path, focus_val)
+    return True, "CS2 agora abre em %sx%s." % (new_width, new_height)
+
 
 def toggle_focus_loss_setting():
-    file_path = find_video_cfg()
-    if not file_path:
-        messagebox.showerror("Erro", "cs2_video.txt não encontrado. Abra o CS2 ao menos uma vez.")
-        return
+    """Inverte fullscreen_min_on_focus_loss. Devolve (ok, msg, novo_valor)."""
+    path = find_video_cfg()
+    if not path:
+        return False, NOT_FOUND, None
+
+    _unlock(path)
     try:
-        os.chmod(file_path, 0o666)
-    except:
-        pass
-    content = _read_file_text(file_path)
-    match = re.search(r'"setting\.fullscreen_min_on_focus_loss"\s+"(\d+)"', content)
+        content = _read(path)
+    except OSError as exc:
+        return False, "Falha ao ler cs2_video.txt: %s" % exc, None
+
+    match = re.search(_RE_FOCUS, content)
     if not match:
-        insert_after = re.search(r'("setting\.defaultresheight"\s+"\d+")', content)
-        to_add = '\n\t\t"setting.fullscreen_min_on_focus_loss"\t\t"0"'
-        if insert_after:
-            content = content.replace(insert_after.group(1), insert_after.group(1) + to_add)
+        anchor = re.search(_RE_H, content)
+        addition = '\n\t\t"setting.fullscreen_min_on_focus_loss"\t\t"0"'
+        if anchor:
+            content = content.replace(anchor.group(0), anchor.group(0) + addition)
         else:
-            content = content.strip() + to_add + "\n"
+            content = content.strip() + addition + "\n"
         new_val = "0"
     else:
-        current_val = match.group(1)
-        new_val = "1" if current_val == "0" else "0"
-        content = re.sub(r'("setting\.fullscreen_min_on_focus_loss"\s+"\d+")', f'"setting.fullscreen_min_on_focus_loss" "{new_val}"', content)
-    _write_file_text(file_path, content)
+        new_val = "1" if match.group(1) == "0" else "0"
+        content = re.sub(
+            _RE_FOCUS,
+            '"setting.fullscreen_min_on_focus_loss" "%s"' % new_val,
+            content,
+        )
+
     try:
-        os.chmod(file_path, 0o444 if new_val == "0" else 0o666)
-    except:
-        pass
+        _write(path, content)
+    except OSError as exc:
+        return False, "Falha ao gravar cs2_video.txt: %s" % exc, None
+    _apply_lock(path, new_val)
+
     if new_val == "0":
-        messagebox.showinfo("Focus Loss", "Focus loss = 0. Arquivo protegido (somente leitura).")
+        msg = "CS2 não minimiza mais no alt-tab. Arquivo protegido."
     else:
-        messagebox.showinfo("Focus Loss", "Focus loss = 1. Arquivo liberado para edição.")
+        msg = "CS2 volta a minimizar no alt-tab. Arquivo liberado."
+    return True, msg, new_val

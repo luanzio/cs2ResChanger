@@ -1,6 +1,7 @@
 import ctypes
 
 ENUM_CURRENT_SETTINGS = -1
+DISPLAY_DEVICE_ATTACHED = 0x1
 DISPLAY_DEVICE_PRIMARY_DEVICE = 0x4
 
 class DEVMODE(ctypes.Structure):
@@ -93,16 +94,80 @@ def get_native_mode(selection: str = "primary"):
         return {k: best[k] for k in ("width", "height", "hz", "bpp")}
     return None
 
-def list_monitors():
-    out = []; idxs = []; i = 0
+def list_modes(selection: str = "primary"):
+    """Todos os modos que o driver aceita nesse monitor, sem repetir.
+
+    Ordenado do maior para o menor, Hz decrescente. O daemon aplica a
+    resolução do jogo no desktop, então só faz sentido oferecer modos
+    que o monitor realmente suporta.
+    """
+    devname = _get_device_name(selection)
+    seen = {}
+    i = 0
+    while True:
+        dm = DEVMODE(); dm.dmSize = ctypes.sizeof(DEVMODE)
+        if not EnumDisplaySettingsW(devname, i, ctypes.byref(dm)):
+            break
+        i += 1
+        if int(dm.dmBitsPerPel) < 32:
+            continue
+        key = (int(dm.dmPelsWidth), int(dm.dmPelsHeight), int(dm.dmDisplayFrequency))
+        seen[key] = {"width": key[0], "height": key[1], "hz": key[2],
+                     "bpp": int(dm.dmBitsPerPel)}
+    return [seen[k] for k in sorted(seen, key=lambda k: (-k[0] * k[1], -k[2]))]
+
+
+def _enum_devices():
+    i = 0
+    out = []
     dd = DISPLAY_DEVICE(); dd.cb = ctypes.sizeof(DISPLAY_DEVICE)
     while EnumDisplayDevicesW(None, i, ctypes.byref(dd), 0):
-        name = dd.DeviceName
-        if name.startswith("\\\\.\\DISPLAY"):
-            try: idxs.append(int(name.replace("\\\\.\\DISPLAY", "")))
-            except: pass
+        out.append((dd.DeviceName, dd.DeviceString, int(dd.StateFlags)))
         i += 1
         dd = DISPLAY_DEVICE(); dd.cb = ctypes.sizeof(DISPLAY_DEVICE)
-    idxs = sorted(set(idxs))
-    out.append("primary"); out.extend([str(n) for n in idxs])
+    return out
+
+
+def list_monitors():
+    idxs = []
+    for name, _desc, flags in _enum_devices():
+        if not (flags & DISPLAY_DEVICE_ATTACHED):
+            continue
+        if name.startswith("\\\\.\\DISPLAY"):
+            try:
+                idxs.append(int(name.replace("\\\\.\\DISPLAY", "")))
+            except ValueError:
+                pass
+    return ["primary"] + [str(n) for n in sorted(set(idxs))]
+
+
+def _monitor_name(adapter: str) -> str:
+    """Nome da tela ligada no adaptador.
+
+    A enumeração de primeiro nível devolve a placa de vídeo, então dois
+    monitores na mesma GPU apareceriam com o mesmo rótulo. O nome da tela
+    está no segundo nível.
+    """
+    dd = DISPLAY_DEVICE(); dd.cb = ctypes.sizeof(DISPLAY_DEVICE)
+    if EnumDisplayDevicesW(adapter, 0, ctypes.byref(dd), 0):
+        return dd.DeviceString or ""
+    return ""
+
+
+def describe_monitors():
+    """[(valor_do_config, rótulo_para_a_UI)] só com monitores ligados."""
+    out = [("primary", "primary — monitor principal")]
+    for name, desc, flags in _enum_devices():
+        if not (flags & DISPLAY_DEVICE_ATTACHED):
+            continue
+        if not name.startswith("\\\\.\\DISPLAY"):
+            continue
+        num = name.replace("\\\\.\\DISPLAY", "")
+        if not num.isdigit():
+            continue
+        title = _monitor_name(name) or desc or "monitor"
+        mode = get_current_mode(num)
+        extra = " · %dx%d" % (mode["width"], mode["height"]) if mode else ""
+        tag = " (principal)" if flags & DISPLAY_DEVICE_PRIMARY_DEVICE else ""
+        out.append((num, "%s — %s%s%s" % (num, title, extra, tag)))
     return out
