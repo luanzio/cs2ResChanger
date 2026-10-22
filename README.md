@@ -3,7 +3,7 @@
 Mantém a resolução do **desktop** igual à do **CS2** enquanto você joga, e devolve
 a resolução normal quando o jogo fecha. O alt-tab passa a ser instantâneo.
 
-![versão](https://img.shields.io/badge/vers%C3%A3o-2.1.2-f5a524)
+![versão](https://img.shields.io/badge/vers%C3%A3o-2.1.3-f5a524)
 ![windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078d4)
 
 ---
@@ -123,7 +123,11 @@ para iniciar na hora.
 }
 ```
 
-`monitor` aceita `"primary"` ou o número do display (`"1"`, `"2"`). O daemon
+`monitor` aceita `"primary"` ou o número do display na numeração do Windows
+(`"1"` é o `\\.\DISPLAY1`). O daemon traduz esse número para o índice que o
+nircmd espera, que é **0-based** — `monitor:0` no nircmd é o primeiro monitor.
+Confundir as duas numerações fazia o modo ser aplicado no monitor errado sem
+nenhum erro aparente; veja o [CHANGELOG](CHANGELOG.md) da 2.1.3. O daemon
 recusa o arquivo se faltar qualquer campo **de resolução**, e registra o motivo
 em `C:\nircmd\cs2-resolucao.log`. Os três campos de vibrance são opcionais: um
 JSON gravado por uma versão anterior continua funcionando.

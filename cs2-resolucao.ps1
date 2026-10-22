@@ -278,6 +278,38 @@ function Resolve-Device {
     return '\\.\DISPLAY1'
 }
 
+# O campo "monitor" do config usa a numeracao do Windows (\\.\DISPLAY1 e o
+# primeiro). O nircmd NAO usa essa numeracao: o indice dele e 0-based, entao
+# "monitor:1" para o nircmd e o SEGUNDO monitor.
+#
+# Essa divergencia causava um bug silencioso e dificil de ver: com
+# "monitor": "1" no config, o nircmd mexia no monitor errado (e falhava, se
+# aquele painel nao aceitasse o modo), enquanto o CS2 trocava o modo do
+# monitor certo sozinho, no fullscreen exclusivo. A verificacao lia o monitor
+# certo, via o modo aplicado pelo jogo e concluia que tinha dado certo. Mas
+# o -updatereg nunca chegava no registro do monitor certo, e ai o alt-tab
+# voltava para a resolucao do desktop - exatamente o que o projeto existe
+# para evitar.
+#
+# Conta apenas os displays ligados, na ordem de enumeracao, que e como o
+# nircmd monta o indice dele.
+function Resolve-NirMonitor {
+    param([string]$Monitor)
+
+    $target = Resolve-Device $Monitor
+    $ATTACHED = 0x1
+    $index = 0
+    for ($i = 0; $i -lt 16; $i++) {
+        $dd = New-Object CS2DD
+        $dd.cb = [System.Runtime.InteropServices.Marshal]::SizeOf([type]'CS2DD')
+        if (-not [CS2Disp]::EnumDisplayDevicesW([IntPtr]::Zero, $i, [ref]$dd, 0)) { break }
+        if (-not ($dd.flags -band $ATTACHED)) { continue }
+        if ($dd.name -eq $target) { return $index }
+        $index++
+    }
+    return 0
+}
+
 function Get-CurrentMode {
     param([string]$Monitor = 'primary')
     try {
@@ -293,8 +325,11 @@ function Get-CurrentMode {
 function Set-Resolution {
     param([string]$Monitor, [int]$W, [int]$H, [int]$Bpp, [int]$Hz)
 
-    # -updatereg e obrigatorio: ver o comentario no topo do arquivo
-    & $NirCmd setdisplay "monitor:$Monitor" $W $H $Bpp $Hz -updatereg
+    # -updatereg e obrigatorio: ver o comentario no topo do arquivo.
+    # O indice do nircmd e 0-based: ver Resolve-NirMonitor.
+    $nirIndex = Resolve-NirMonitor $Monitor
+    Write-Log ("   alvo: {0} (nircmd monitor:{1})" -f (Resolve-Device $Monitor), $nirIndex)
+    & $NirCmd setdisplay "monitor:$nirIndex" $W $H $Bpp $Hz -updatereg
     Start-Sleep -Milliseconds 400
 
     $actual = Get-CurrentMode $Monitor
@@ -304,7 +339,7 @@ function Set-Resolution {
         Write-Log "nao consegui ler o modo de $Monitor para conferir" 'WARN'
     } elseif ($actual.W -ne $W -or $actual.H -ne $H) {
         Write-Log "modo nao aplicou ($($actual.W)x$($actual.H)), tentando de novo" 'WARN'
-        & $NirCmd setdisplay "monitor:$Monitor" $W $H $Bpp $Hz -updatereg
+        & $NirCmd setdisplay "monitor:$nirIndex" $W $H $Bpp $Hz -updatereg
         Start-Sleep -Milliseconds 600
     }
 }

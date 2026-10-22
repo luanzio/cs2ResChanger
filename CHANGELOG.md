@@ -1,5 +1,39 @@
 # Changelog
 
+## 2.1.3 — 2026-10-22
+
+### O índice de monitor do nircmd é 0-based, e isso quebrava o alt-tab
+
+O campo `monitor` do `cs2-config.json` usa a numeração do Windows, em que
+`\\.\DISPLAY1` é o primeiro monitor. O nircmd **não** usa essa numeração: a
+[referência oficial](https://nircmd.nirsoft.net/setdisplay.html) diz que o
+índice é 0-based, então `monitor:1` para o nircmd é o **segundo** monitor.
+
+Com `"monitor": "1"` no config, o resultado era um bug silencioso e difícil
+de enxergar:
+
+1. O nircmd aplicava o modo no monitor errado — e falhava calado, se aquele
+   painel não aceitasse a resolução ou a taxa pedida.
+2. O CS2, em fullscreen exclusivo, trocava o modo do monitor certo sozinho.
+3. A verificação do daemon lia o monitor certo, encontrava o modo do jogo
+   aplicado pelo próprio jogo, e concluía que tinha dado tudo certo.
+4. Mas o `-updatereg` nunca chegava no registro do monitor certo. No
+   alt-tab, o Windows voltava para a resolução do desktop — exatamente o
+   problema que o projeto existe para evitar.
+
+Nada no log denunciava isso: as linhas de troca e restauração apareciam
+normalmente, sem nenhum aviso.
+
+- `Resolve-NirMonitor` traduz o campo `monitor` para o índice do nircmd,
+  contando só os displays ligados, na ordem de enumeração
+- O log passou a registrar o device e o índice usados (`alvo: \\.\DISPLAY1
+  (nircmd monitor:0)`), para que um descasamento desses apareça na hora
+
+Quem usava `"monitor": "primary"` nunca foi afetado; o problema só aparecia
+ao escolher um monitor pelo número.
+
+---
+
 ## 2.1.2 — 2026-10-22
 
 ### Ligar o vibrance no app não fazia efeito nenhum
