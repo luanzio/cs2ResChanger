@@ -1,5 +1,43 @@
 # Changelog
 
+## 2.1.0 — 2026-10-22
+
+### Digital vibrance (NVIDIA)
+
+Mesmo ciclo da resolução: um nível durante a partida, outro ao fechar o jogo,
+aplicado **só no monitor do campo `monitor`**. Três campos novos e opcionais no
+`cs2-config.json` — `vibranceEnabled`, `vibranceGame`, `vibranceDesktop` — que
+um JSON de versão anterior simplesmente não tem, e aí o daemon ignora o recurso.
+
+- **Vem desligado.** Ligar faz o daemon assumir o controle do DVC daquele
+  monitor; quem já ajusta esse valor por fora não ia querer isso acontecendo
+  sozinho depois de uma atualização.
+- Escala **0–100 com padrão 50**, a mesma do Painel de Controle da NVIDIA. A
+  `NvAPI_GetDVCInfo` antiga é 0–63 com 0 = sem boost, e mostraria um número que
+  não bate com o do painel; o código usa a variante `Ex`.
+- O handle da NVAPI é casado com o nome de device (`\\.\DISPLAYn`) por
+  `NvAPI_GetAssociatedNvidiaDisplayName`, e reenumerado a cada chamada — depois
+  de uma troca de modo ou hotplug o handle antigo pode não valer mais.
+- Aplicado **depois** da troca de resolução, porque uma mudança de modo de vídeo
+  pode reiniciar o DVC.
+- O daemon reaplica o nível de desktop ao subir: o driver guarda o DVC entre
+  sessões, então um travamento no meio da partida deixaria o nível de jogo preso.
+- Não precisa de Admin, e não precisa de binário externo: usa a `nvapi64.dll`
+  que já vem com o driver.
+- Degrada em silêncio. A NVAPI não exporta as funções por nome — expõe um
+  `nvapi_QueryInterface(id)` cujos ids vêm de engenharia reversa. Se qualquer
+  passo falhar, o daemon loga um aviso e segue trocando resolução; no app a
+  seção nem aparece.
+
+### Interface
+
+- Seção nova com uma chave liga/desliga e dois sliders, com o valor que está
+  ativo na placa mostrado ao lado
+- Botão **Testar** em cada slider, que aplica na hora para dar para ver a cor
+- Widget `Slider` novo em `app/widgets.py`
+
+---
+
 ## 2.0.0 — 2026-10-22
 
 A arquitetura **não muda**: o daemon PowerShell continua sendo o motor certo, e o

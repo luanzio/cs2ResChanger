@@ -2,7 +2,7 @@ import os
 import sys
 
 APP_NAME = "CS2ResChanger"
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.1.0"
 
 NIRCMD_DIR = r"C:\nircmd"
 NIRCMD_EXE = os.path.join(NIRCMD_DIR, "nircmd.exe")

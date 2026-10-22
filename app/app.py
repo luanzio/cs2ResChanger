@@ -8,7 +8,7 @@ import os
 import re
 import tkinter as tk
 
-from . import daemon
+from . import daemon, vibrance
 from .config_store import load_config, save_config
 from .constants import APP_NAME, APP_VERSION, PRESETS, icon_path
 from .cs2_file import (
@@ -28,6 +28,7 @@ from .widgets import (
     Input,
     Pill,
     Select,
+    Slider,
     StatTile,
     Switch,
     Toast,
@@ -86,6 +87,7 @@ class App:
         self._build_header(wrap)
         self._build_stats(wrap)
         self._build_cards(wrap)
+        self._build_vibrance(wrap)
         self._build_favorites(wrap)
         self._build_footer(wrap)
 
@@ -214,6 +216,52 @@ class App:
         Button(acts2, "Nativa", self._desktop_from_native, "ghost", P.card,
                height=30).pack(side="left")
 
+    def _build_vibrance(self, parent):
+        """Seção do digital vibrance. Só existe em máquina com NVAPI."""
+        self.vib_sliders = {}
+        self.vib_labels = {}
+        self.sw_vibrance = None
+        if not vibrance.available():
+            return
+
+        card = Card(parent, pad=14)
+        card.pack(fill="x", pady=(S(12), 0))
+        b = card.body
+
+        self.sw_vibrance = Switch(
+            b, "Digital vibrance", "controlado pelo daemon", P.card,
+            value=bool(self.cfg.get("vibranceEnabled", False)),
+            command=self._toggle_vibrance,
+        )
+        self.sw_vibrance.pack(side="left", padx=(0, S(22)))
+
+        for field, titulo in (("vibranceGame", "JOGO"), ("vibranceDesktop", "DESKTOP")):
+            group = tk.Frame(b, bg=P.card)
+            group.pack(side="left", padx=(0, S(18)))
+            label(group, titulo, P.card, 8.5, P.mute, "bold").pack(anchor="w",
+                                                                   pady=(0, S(4)))
+            row = tk.Frame(group, bg=P.card)
+            row.pack(anchor="w")
+
+            value = int(self.cfg.get(field, 50))
+            readout = label(row, "%d%%" % value, P.card, 11, P.text, "bold",
+                            width=5, anchor="w")
+            slider = Slider(
+                row, bg=P.card, width=132, value=value,
+                on_change=lambda v, f=field: self._on_vibrance_slide(f, v),
+            )
+            slider.pack(side="left", padx=(0, S(8)))
+            readout.pack(side="left", padx=(0, S(6)))
+            Button(row, "Testar", lambda f=field: self._preview_vibrance(f),
+                   "ghost", P.card, height=28).pack(side="left")
+
+            self.vib_sliders[field] = slider
+            self.vib_labels[field] = readout
+
+        self.vib_now = label(b, "", P.card, 9.5, P.mute)
+        self.vib_now.pack(side="right")
+        self._sync_vibrance_enabled()
+
     def _build_favorites(self, parent):
         card = Card(parent, pad=17)
         card.pack(fill="x", pady=(S(12), 0))
@@ -311,6 +359,7 @@ class App:
 
         self._modes = list_modes(mon)
         self.sel_mode.set_values([_fmt_mode(m) for m in self._modes])
+        self._refresh_vibrance_now()
 
     def _refresh_focus_switch(self):
         value, readonly = read_focus_loss()
@@ -460,6 +509,48 @@ class App:
         self._rebuild_favorites()
         self.toast.show("%s removida." % fav, "ok")
 
+    # ---------------------------------------------------------- vibrance
+
+    def _on_vibrance_slide(self, field, value):
+        self.vib_labels[field].configure(text="%d%%" % value)
+
+    def _toggle_vibrance(self, value):
+        self.cfg["vibranceEnabled"] = bool(value)
+        ok, msg = save_config(self.cfg)
+        if not ok:
+            self.toast.show(msg, "erro")
+            return
+        self._sync_vibrance_enabled()
+        if value:
+            self.toast.show("O daemon passa a controlar o vibrance.", "ok")
+        else:
+            self.toast.show("O daemon não mexe mais no vibrance.", "info")
+
+    def _sync_vibrance_enabled(self):
+        if self.sw_vibrance is None:
+            return
+        on = self.sw_vibrance.get()
+        self.sw_vibrance.set_sub(
+            "aplicado no monitor selecionado" if on else "o daemon não vai mexer"
+        )
+        for field, readout in self.vib_labels.items():
+            readout.configure(fg=P.text if on else P.mute)
+
+    def _preview_vibrance(self, field):
+        """Aplica agora só para o usuário ver. Em jogo quem aplica é o daemon."""
+        level = self.vib_sliders[field].get()
+        ok, msg = vibrance.set_level(self._monitor_value(), level)
+        self.toast.show(msg, "ok" if ok else "erro")
+        self._refresh_vibrance_now()
+
+    def _refresh_vibrance_now(self):
+        if self.sw_vibrance is None:
+            return
+        level = vibrance.get_level(self._monitor_value())
+        self.vib_now.configure(
+            text="agora: %d%%" % level if level is not None else "agora: n/d"
+        )
+
     def _toggle_focus(self, _value):
         ok, msg, _new = toggle_focus_loss_setting()
         self.toast.show(msg, "ok" if ok else "erro")
@@ -500,6 +591,12 @@ class App:
             "monitor": self._monitor_value(),
             "defaultWidth": dw, "defaultHeight": dh, "defaultHz": dhz,
         })
+        if self.sw_vibrance is not None:
+            self.cfg.update({
+                "vibranceEnabled": self.sw_vibrance.get(),
+                "vibranceGame": self.vib_sliders["vibranceGame"].get(),
+                "vibranceDesktop": self.vib_sliders["vibranceDesktop"].get(),
+            })
         saved, save_msg = save_config(self.cfg)
         if not saved:
             self.toast.show(save_msg, "erro")

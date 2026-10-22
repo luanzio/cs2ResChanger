@@ -18,6 +18,12 @@ DEFAULTS = {
     "defaultHeight": 1080,
     "defaultHz": 240,
     "favorites": [],
+    # Digital vibrance: desligado por padrão de propósito. Ligar faz o daemon
+    # assumir o controle do DVC do monitor, e quem já ajusta esse valor por
+    # fora não ia querer isso acontecendo sozinho depois de uma atualização.
+    "vibranceEnabled": False,
+    "vibranceGame": 50,
+    "vibranceDesktop": 50,
 }
 
 
@@ -40,6 +46,8 @@ def load_config():
             cfg[key] = [str(v) for v in value] if isinstance(value, list) else []
         elif key == "monitor":
             cfg[key] = str(value) if value else "primary"
+        elif isinstance(default, bool):
+            cfg[key] = bool(value)
         else:
             try:
                 cfg[key] = int(value)

@@ -568,6 +568,81 @@ class Switch(tk.Frame):
         self.set(not self._value, notify=True)
 
 
+# ---------------------------------------------------------------- Slider
+
+
+class Slider(tk.Canvas):
+    """Controle deslizante. Arrastar ou clicar em qualquer ponto da trilha."""
+
+    def __init__(self, parent, bg=P.card, width=150, height=26,
+                 minimum=0, maximum=100, value=50, on_change=None):
+        self.cw, self.ch = S(width), S(height)
+        super().__init__(parent, width=self.cw, height=self.ch, bg=bg,
+                         highlightthickness=0, bd=0, takefocus=0, cursor="hand2")
+        self._min, self._max = minimum, maximum
+        self._value = value
+        self._on_change = on_change
+        self._hover = False
+        self._r = max(S(6), self.ch // 2 - S(4))
+
+        self.bind("<Button-1>", self._jump)
+        self.bind("<B1-Motion>", self._jump)
+        self.bind("<Enter>", lambda _: self._set_hover(True))
+        self.bind("<Leave>", lambda _: self._set_hover(False))
+        self._draw()
+
+    # --- geometria
+
+    def _x0(self):
+        return self._r + S(1)
+
+    def _x1(self):
+        return self.cw - self._r - S(1)
+
+    def _knob_x(self):
+        span = max(1, self._max - self._min)
+        t = (self._value - self._min) / span
+        return self._x0() + t * (self._x1() - self._x0())
+
+    def _draw(self):
+        self.delete("all")
+        cy = self.ch // 2
+        kx = self._knob_x()
+        self.create_line(self._x0(), cy, self._x1(), cy, width=S(4),
+                         fill=P.border_hi, capstyle="round")
+        if kx > self._x0():
+            self.create_line(self._x0(), cy, kx, cy, width=S(4),
+                             fill=P.accent, capstyle="round")
+        r = self._r + (S(1) if self._hover else 0)
+        self.create_oval(kx - r, cy - r, kx + r, cy + r,
+                         fill="#f4f7fb" if self._hover else "#e2e8f0", outline="")
+
+    def _set_hover(self, on):
+        self._hover = on
+        self._draw()
+
+    # --- estado
+
+    def get(self):
+        return self._value
+
+    def set(self, value, notify=False):
+        value = max(self._min, min(self._max, int(value)))
+        changed = value != self._value
+        self._value = value
+        self._draw()
+        if notify and changed and self._on_change:
+            self._on_change(value)
+
+    def _jump(self, ev):
+        span = self._x1() - self._x0()
+        if span <= 0:
+            return
+        t = (ev.x - self._x0()) / span
+        t = max(0.0, min(1.0, t))
+        self.set(round(self._min + t * (self._max - self._min)), notify=True)
+
+
 # -------------------------------------------------------------- StatTile
 
 

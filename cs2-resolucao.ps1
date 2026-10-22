@@ -5,6 +5,10 @@
 #  quando fecha, para que o alt-tab nao force troca de modo
 #  de video.
 #
+#  Opcionalmente troca tambem o digital vibrance (NVIDIA), no
+#  mesmo monitor do config. Desligado por padrao: so age se o
+#  cs2-config.json trouxer "vibranceEnabled": true.
+#
 #  Mesma arquitetura da v1 (daemon iniciado oculto pelo .vbs
 #  no login), com as correcoes listadas no CHANGELOG.md:
 #
@@ -41,6 +45,9 @@ $GameProcess = 'cs2'
 $MaxLogKB    = 256
 $MutexName   = 'Local\cs2-resolucao-v2'
 
+# Set-StrictMode reclama de variavel nao definida, entao ja nasce declarada
+$script:VibranceReady = $false
+
 function Write-Log {
     param([string]$Message, [string]$Level = 'INFO')
     $line = '{0} [{1}] {2}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Level, $Message
@@ -62,6 +69,29 @@ function Get-Config {
         }
     }
     return $cfg
+}
+
+# Os campos de vibrance sao opcionais de proposito: um cs2-config.json
+# gravado por uma versao anterior do app nao tem nenhum deles, e o daemon
+# precisa continuar funcionando com esse arquivo sem reclamar.
+function Get-CfgValue {
+    param($Cfg, [string]$Name, $Default)
+    if (-not $Cfg.PSObject.Properties.Name.Contains($Name)) { return $Default }
+    $value = $Cfg.$Name
+    if ($null -eq $value) { return $Default }
+    return $value
+}
+
+function Get-CfgInt {
+    param($Cfg, [string]$Name, [int]$Default)
+    $value = Get-CfgValue $Cfg $Name $Default
+    try { return [int]$value } catch { return $Default }
+}
+
+function Get-CfgBool {
+    param($Cfg, [string]$Name, [bool]$Default)
+    $value = Get-CfgValue $Cfg $Name $Default
+    try { return [bool]$value } catch { return $Default }
 }
 
 # ATENCAO: nao usar [System.Windows.Forms.Screen] aqui.
@@ -102,6 +132,121 @@ public class CS2Disp {
   // dev como IntPtr para poder passar NULL de verdade: "" nao enumera nada
   [DllImport("user32.dll", CharSet=CharSet.Unicode)]
   public static extern bool EnumDisplayDevicesW(IntPtr dev, int num, ref CS2DD dd, int flags);
+}
+'@ -ErrorAction SilentlyContinue
+
+# ---- digital vibrance (NVAPI) ---------------------------------------
+# A NVAPI nao exporta as funcoes por nome: exporta um unico
+# nvapi_QueryInterface(id) que devolve o ponteiro de cada uma. Os ids sao
+# valores internos, conhecidos por engenharia reversa e estaveis ha muitos
+# anos, mas sem garantia da NVIDIA. Por isso tudo aqui e opcional: se
+# qualquer passo falhar, o daemon segue trocando resolucao normalmente.
+#
+# Usa a variante Ex (escala 0-100, padrao 50), que e a mesma do slider do
+# Painel de Controle da NVIDIA. A GetDVCInfo antiga e 0-63 com 0 = sem
+# boost, o que daria um numero que nao bate com o que se ve no painel.
+#
+# So mexe no monitor configurado: casa o handle da NVAPI com o nome de
+# device (\\.\DISPLAYn) por NvAPI_GetAssociatedNvidiaDisplayName.
+Add-Type @'
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+
+public static class CS2Nv {
+  [DllImport("kernel32", CharSet=CharSet.Ansi)] static extern IntPtr LoadLibrary(string n);
+  [DllImport("kernel32", CharSet=CharSet.Ansi)] static extern IntPtr GetProcAddress(IntPtr m, string n);
+
+  [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate IntPtr DQuery(uint id);
+  [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate int DSimple();
+  [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate int DEnum(int i, ref IntPtr h);
+  [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate int DName(IntPtr d, StringBuilder s);
+  [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate int DGet(IntPtr d, uint o, ref DVCEX i);
+  [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate int DSet(IntPtr d, uint o, ref DVCEX i);
+
+  [StructLayout(LayoutKind.Sequential)]
+  public struct DVCEX { public uint version; public int current, min, max, def; }
+
+  const uint ID_INIT = 0x0150E828, ID_UNLOAD = 0xD22BDD7E, ID_ENUM = 0x9ABDD40D,
+             ID_NAME = 0x22A78B05, ID_GETEX = 0x0E45002D, ID_SETEX = 0x4A82C2B1;
+
+  static uint Ver { get { return (uint)(20 | (1 << 16)); } }
+
+  static DQuery _q; static DSimple _init, _unload; static DEnum _enum;
+  static DName _name; static DGet _get; static DSet _set;
+  static bool _ready;
+
+  static T Fn<T>(uint id) where T : class {
+    IntPtr p = _q(id);
+    if (p == IntPtr.Zero) return null;
+    return Marshal.GetDelegateForFunctionPointer(p, typeof(T)) as T;
+  }
+
+  public static bool Init() {
+    if (_ready) return true;
+    try {
+      IntPtr mod = LoadLibrary("nvapi64.dll");
+      if (mod == IntPtr.Zero) return false;
+      IntPtr q = GetProcAddress(mod, "nvapi_QueryInterface");
+      if (q == IntPtr.Zero) return false;
+      _q = (DQuery)Marshal.GetDelegateForFunctionPointer(q, typeof(DQuery));
+      _init = Fn<DSimple>(ID_INIT); _unload = Fn<DSimple>(ID_UNLOAD);
+      _enum = Fn<DEnum>(ID_ENUM);   _name  = Fn<DName>(ID_NAME);
+      _get  = Fn<DGet>(ID_GETEX);   _set   = Fn<DSet>(ID_SETEX);
+      if (_init == null || _enum == null || _name == null || _get == null || _set == null)
+        return false;
+      if (_init() != 0) return false;
+      _ready = true;
+      return true;
+    } catch { return false; }
+  }
+
+  public static void Shutdown() {
+    try { if (_ready && _unload != null) _unload(); } catch { }
+    _ready = false;
+  }
+
+  // O handle e reenumerado a cada chamada de proposito: depois de uma troca
+  // de modo ou de um hotplug o handle antigo pode nao valer mais.
+  static IntPtr Handle(string device) {
+    for (int i = 0; i < 16; i++) {
+      IntPtr h = IntPtr.Zero;
+      if (_enum(i, ref h) != 0) break;
+      StringBuilder sb = new StringBuilder(64);
+      if (_name(h, sb) != 0) continue;
+      if (string.Equals(sb.ToString(), device, StringComparison.OrdinalIgnoreCase))
+        return h;
+    }
+    return IntPtr.Zero;
+  }
+
+  // -1 = indisponivel
+  public static int GetLevel(string device) {
+    if (!_ready) return -1;
+    try {
+      IntPtr h = Handle(device);
+      if (h == IntPtr.Zero) return -1;
+      DVCEX info = new DVCEX(); info.version = Ver;
+      if (_get(h, 0, ref info) != 0) return -1;
+      return info.current;
+    } catch { return -1; }
+  }
+
+  // devolve o nivel aplicado, ou -1
+  public static int SetLevel(string device, int level) {
+    if (!_ready) return -1;
+    try {
+      IntPtr h = Handle(device);
+      if (h == IntPtr.Zero) return -1;
+      DVCEX info = new DVCEX(); info.version = Ver;
+      if (_get(h, 0, ref info) != 0) return -1;
+      if (level < info.min) level = info.min;
+      if (level > info.max) level = info.max;
+      DVCEX w = new DVCEX(); w.version = Ver; w.current = level;
+      if (_set(h, 0, ref w) != 0) return -1;
+      return level;
+    } catch { return -1; }
+  }
 }
 '@ -ErrorAction SilentlyContinue
 
@@ -159,10 +304,32 @@ function Set-Resolution {
     }
 }
 
+# Aplica o vibrance SO no monitor do config, e so se o usuario ligou a
+# opcao. Vai depois da troca de resolucao de proposito: uma mudanca de modo
+# pode reiniciar o DVC, e nessa ordem nao importa se reinicia.
+function Set-Vibrance {
+    param($Cfg, [string]$Field)
+
+    if (-not $script:VibranceReady) { return }
+    if (-not (Get-CfgBool $Cfg 'vibranceEnabled' $false)) { return }
+
+    $level = Get-CfgInt $Cfg $Field -1
+    if ($level -lt 0) { return }
+
+    $device = Resolve-Device $Cfg.monitor
+    $applied = [CS2Nv]::SetLevel($device, $level)
+    if ($applied -lt 0) {
+        Write-Log "vibrance nao aplicou em $device (alvo $level)" 'WARN'
+    } else {
+        Write-Log ("vibrance {0} -> {1}" -f $device, $applied)
+    }
+}
+
 function Restore-Desktop {
     param($Cfg)
     Write-Log ("desktop -> {0}x{1}@{2}" -f $Cfg.defaultWidth, $Cfg.defaultHeight, $Cfg.defaultHz)
     Set-Resolution $Cfg.monitor $Cfg.defaultWidth $Cfg.defaultHeight $Cfg.resBPP $Cfg.defaultHz
+    Set-Vibrance $Cfg 'vibranceDesktop'
 }
 
 # ---- instancia unica -------------------------------------------------
@@ -187,6 +354,19 @@ try {
     if (-not (Test-Path $NirCmd)) { throw "nircmd nao encontrado: $NirCmd" }
     $cfg = Get-Config
     Write-Log 'iniciado'
+
+    if (Get-CfgBool $cfg 'vibranceEnabled' $false) {
+        $script:VibranceReady = [CS2Nv]::Init()
+        if ($script:VibranceReady) {
+            $dev = Resolve-Device $cfg.monitor
+            Write-Log ("vibrance ligado em {0} (atual {1})" -f $dev, [CS2Nv]::GetLevel($dev))
+            # o driver guarda o DVC entre sessoes, entao se a maquina caiu
+            # no meio da partida o nivel de jogo pode ter sobrevivido
+            Set-Vibrance $cfg 'vibranceDesktop'
+        } else {
+            Write-Log 'vibrance pedido no config, mas a NVAPI nao respondeu; seguindo sem ele' 'WARN'
+        }
+    }
 } catch {
     Write-Log "falha no pre-flight: $($_.Exception.Message)" 'ERRO'
     if ($mutex) { try { $mutex.ReleaseMutex() } catch { } }
@@ -241,6 +421,7 @@ try {
 
         Write-Log ("jogo -> {0}x{1}@{2}" -f $cfg.resWidth, $cfg.resHeight, $cfg.resHz)
         Set-Resolution $cfg.monitor $cfg.resWidth $cfg.resHeight $cfg.resBPP $cfg.resHz
+        Set-Vibrance $cfg 'vibranceGame'
 
         # bloqueia sem consumir CPU ate o jogo fechar.
         # Durante a partida este processo nao acorda nenhuma vez.
@@ -258,7 +439,11 @@ finally {
         if ($cur -and $cur.W -ne $cfg.defaultWidth) {
             Write-Log 'encerrando, restaurando desktop' 'WARN'
             Restore-Desktop $cfg
+        } else {
+            # resolucao ja estava certa, mas o vibrance pode estar no de jogo
+            Set-Vibrance $cfg 'vibranceDesktop'
         }
     } catch { }
+    try { [CS2Nv]::Shutdown() } catch { }
     if ($mutex) { try { $mutex.ReleaseMutex() } catch { } }
 }

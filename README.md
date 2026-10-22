@@ -3,7 +3,7 @@
 Mantém a resolução do **desktop** igual à do **CS2** enquanto você joga, e devolve
 a resolução normal quando o jogo fecha. O alt-tab passa a ser instantâneo.
 
-![versão](https://img.shields.io/badge/vers%C3%A3o-2.0.0-f5a524)
+![versão](https://img.shields.io/badge/vers%C3%A3o-2.1.0-f5a524)
 ![windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078d4)
 
 ---
@@ -97,6 +97,7 @@ para iniciar na hora.
 | **Resolução de jogo** | largura, altura, Hz e BPP com que o CS2 abre. Atalhos para as resoluções mais usadas e botões para copiar do Windows, da nativa ou do próprio `cs2_video.txt`. |
 | **Resolução do desktop** | para onde o Windows volta ao fechar o jogo. A lista "modos que o monitor aceita" vem direto do driver. |
 | **Favoritas** | clique numa para carregar nos campos de jogo; o `×` remove. |
+| **Digital vibrance** | só aparece em máquina NVIDIA. Um nível para o jogo e outro para o desktop, aplicados **apenas no monitor selecionado**. O botão *Testar* aplica na hora para você ver. |
 | **Não minimizar no alt-tab** | alterna `fullscreen_min_on_focus_loss`. Em `0`, o arquivo volta a somente-leitura para o CS2 não reescrever por cima. |
 | **APLICAR E SALVAR** | grava o `cs2_video.txt` e o `cs2-config.json`. Avisa se o monitor não aceitar o modo escolhido. |
 
@@ -114,13 +115,52 @@ para iniciar na hora.
   "defaultWidth": 1920,
   "defaultHeight": 1080,
   "defaultHz": 240,
-  "favorites": ["1280x960@240"]
+  "favorites": ["1280x960@240"],
+
+  "vibranceEnabled": false,
+  "vibranceGame": 70,
+  "vibranceDesktop": 50
 }
 ```
 
 `monitor` aceita `"primary"` ou o número do display (`"1"`, `"2"`). O daemon
-recusa o arquivo se faltar qualquer campo, e registra o motivo em
-`C:\nircmd\cs2-resolucao.log`.
+recusa o arquivo se faltar qualquer campo **de resolução**, e registra o motivo
+em `C:\nircmd\cs2-resolucao.log`. Os três campos de vibrance são opcionais: um
+JSON gravado por uma versão anterior continua funcionando.
+
+---
+
+## Digital vibrance (NVIDIA)
+
+Mesma ideia da resolução: um nível enquanto o CS2 está aberto, outro quando ele
+fecha. É aplicado **só no monitor do campo `monitor`** — os outros não são
+tocados.
+
+A escala é **0 a 100, com 50 = padrão**, igual ao slider do Painel de Controle
+da NVIDIA.
+
+**Vem desligado.** Ligar faz o daemon assumir o controle do vibrance daquele
+monitor, e quem já ajusta esse valor por fora não ia querer isso acontecendo
+sozinho depois de uma atualização. Ligue pela chave no app, ou ponha
+`"vibranceEnabled": true` no JSON.
+
+Alguns detalhes que valem saber:
+
+- Roda **sem Admin**, pela `nvapi64.dll` que já vem com o driver. Nada para instalar.
+- O vibrance é aplicado **depois** da troca de resolução, de propósito: uma
+  mudança de modo de vídeo pode reiniciar o DVC.
+- O driver guarda o nível entre sessões, então o daemon reaplica o nível de
+  desktop quando sobe — se a máquina caiu no meio da partida, o nível de jogo
+  não fica preso.
+- Se outro programa de vibrance estiver rodando (vibranceGUI e afins), os dois
+  vão disputar o mesmo valor. Use um ou outro.
+- **Só NVIDIA.** Em máquina AMD ou Intel a seção simplesmente não aparece.
+
+> A NVAPI não expõe essas funções por nome: tem um único `nvapi_QueryInterface(id)`
+> que devolve o ponteiro de cada uma, e os ids são valores internos conhecidos
+> por engenharia reversa. São estáveis há muitos anos, mas não são contrato
+> público da NVIDIA. Por isso o recurso é inteiramente opcional: se qualquer
+> passo falhar, o daemon registra um aviso e segue trocando resolução normalmente.
 
 ---
 
@@ -222,6 +262,7 @@ cs2ResChanger/
 │  ├─ cs2_file.py       cs2_video.txt
 │  ├─ config_store.py   cs2-config.json
 │  ├─ daemon.py         estado do daemon
+│  ├─ vibrance.py       digital vibrance pela NVAPI
 │  └─ constants.py
 ├─ assets/cs2.ico
 ├─ cs2-resolucao.ps1    daemon
