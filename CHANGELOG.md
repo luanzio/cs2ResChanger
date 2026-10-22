@@ -1,5 +1,39 @@
 # Changelog
 
+## 2.1.1 — 2026-10-22
+
+### Os avisos flutuantes empilhavam e não sumiam
+
+`Canvas` sobrescreve `lift` com `tag_raise`, o método que levanta **itens
+desenhados** e exige um argumento. Então `canvas.lift()`, que parecia ser o
+`Misc.lift` de empilhar janelas, levantava `TclError`:
+
+```
+wrong # args: should be ".!_round raise tagOrId ?aboveThis?"
+```
+
+A exceção estourava **depois** do `place()` e **antes** de guardar a
+referência. O aviso já estava na tela, o objeto perdia o ponteiro para ele e
+nunca agendava o `hide`. Resultado: cada aviso ficava para sempre e os
+seguintes se desenhavam por cima.
+
+- `tk.Misc.lift(c)` explícito no lugar de `c.lift()`
+- O `Toast` passou a rastrear **todos** os canvases que cria, não só o último,
+  então um `show()` que falhe no meio não deixa nada preso na tela
+- `show()` captura falha de construção e limpa antes de sair
+- Mensagem longa é truncada na largura da janela em vez de vazar para fora
+
+### Espaçamento
+
+- O aviso agora para **acima do rodapé**, em vez de cobrir a chave de alt-tab
+  e o botão de aplicar
+- A linha do vibrance cabia por pouco e cortava o "agora: 50%" na borda
+  direita; larguras e espaços ajustados
+- O seletor de monitor não repete mais a resolução, que já está nos
+  indicadores do topo e só fazia o nome truncar
+
+---
+
 ## 2.1.0 — 2026-10-22
 
 ### Digital vibrance (NVIDIA)

@@ -229,29 +229,29 @@ class App:
         b = card.body
 
         self.sw_vibrance = Switch(
-            b, "Digital vibrance", "controlado pelo daemon", P.card,
+            b, "Digital vibrance", "no monitor selecionado", P.card,
             value=bool(self.cfg.get("vibranceEnabled", False)),
             command=self._toggle_vibrance,
         )
-        self.sw_vibrance.pack(side="left", padx=(0, S(22)))
+        self.sw_vibrance.pack(side="left", padx=(0, S(16)))
 
         for field, titulo in (("vibranceGame", "JOGO"), ("vibranceDesktop", "DESKTOP")):
             group = tk.Frame(b, bg=P.card)
-            group.pack(side="left", padx=(0, S(18)))
+            group.pack(side="left", padx=(0, S(14)))
             label(group, titulo, P.card, 8.5, P.mute, "bold").pack(anchor="w",
-                                                                   pady=(0, S(4)))
+                                                                   pady=(0, S(5)))
             row = tk.Frame(group, bg=P.card)
             row.pack(anchor="w")
 
             value = int(self.cfg.get(field, 50))
             readout = label(row, "%d%%" % value, P.card, 11, P.text, "bold",
-                            width=5, anchor="w")
+                            width=4, anchor="w")
             slider = Slider(
-                row, bg=P.card, width=132, value=value,
+                row, bg=P.card, width=116, value=value,
                 on_change=lambda v, f=field: self._on_vibrance_slide(f, v),
             )
             slider.pack(side="left", padx=(0, S(8)))
-            readout.pack(side="left", padx=(0, S(6)))
+            readout.pack(side="left", padx=(0, S(4)))
             Button(row, "Testar", lambda f=field: self._preview_vibrance(f),
                    "ghost", P.card, height=28).pack(side="left")
 
@@ -259,7 +259,7 @@ class App:
             self.vib_labels[field] = readout
 
         self.vib_now = label(b, "", P.card, 9.5, P.mute)
-        self.vib_now.pack(side="right")
+        self.vib_now.pack(side="right", padx=(S(4), 0))
         self._sync_vibrance_enabled()
 
     def _build_favorites(self, parent):
@@ -280,6 +280,9 @@ class App:
     def _build_footer(self, parent):
         card = Card(parent, pad=14)
         card.pack(fill="x", pady=(S(12), 0))
+        self.footer_card = card
+        # os avisos flutuantes passam a parar acima do rodape
+        self.toast.clear_of(card)
         b = card.body
 
         self.sw_focus = Switch(
@@ -531,7 +534,7 @@ class App:
             return
         on = self.sw_vibrance.get()
         self.sw_vibrance.set_sub(
-            "aplicado no monitor selecionado" if on else "o daemon não vai mexer"
+            "no monitor selecionado" if on else "desligado"
         )
         for field, readout in self.vib_labels.items():
             readout.configure(fg=P.text if on else P.mute)

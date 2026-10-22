@@ -688,35 +688,72 @@ class Pill(_Round):
 
 
 class Toast:
-    """Aviso flutuante no rodape. Substitui as messagebox do Windows."""
+    """Aviso flutuante no rodape. Substitui as messagebox do Windows.
+
+    Guarda TODOS os canvases que criou, nao so o ultimo. Se um show()
+    falhar no meio, o canvas ja posicionado continua rastreado e some no
+    proximo hide() em vez de ficar na tela para sempre.
+    """
 
     COLORS = {"ok": P.ok, "erro": P.danger, "info": P.info, "aviso": P.warn}
 
     def __init__(self, root):
         self.root = root
-        self._canvas = None
+        self._live = []
         self._job = None
+        self._clear_of = None
+
+    def clear_of(self, widget):
+        """Widget que o aviso nao deve cobrir (o rodape)."""
+        self._clear_of = widget
+
+    def _bottom_offset(self):
+        base = S(18)
+        if self._clear_of is not None:
+            try:
+                return base + self._clear_of.winfo_height() + S(10)
+            except Exception:
+                pass
+        return base
 
     def show(self, message, kind="ok", ms=2800):
         self.hide()
+        try:
+            self._build(message, kind)
+        except Exception:
+            # nunca deixa um aviso meio-construido preso na tela
+            self.hide()
+            return
+        self._job = self.root.after(ms, self.hide)
+
+    def _build(self, message, kind):
         font = F(10.5)
         fm = tkfont.Font(root=self.root, font=font)
         pad = S(16)
-        w = fm.measure(message) + 2 * pad + S(18)
+        dot = S(8)
+        gap = S(10)
+
+        # nao deixa passar da largura da janela
+        room = max(S(160), self.root.winfo_width() - S(40) - 2 * pad - dot - gap)
+        if fm.measure(message) > room:
+            while message and fm.measure(message + "…") > room:
+                message = message[:-1]
+            message += "…"
+
+        w = fm.measure(message) + 2 * pad + dot + gap
         h = S(38)
 
         c = _Round(self.root, int(w), h, P.bg)
+        self._live.append(c)
         c.paint(h // 2, P.card_hi, P.border_hi, 1)
-        d = S(8)
-        c.create_oval(pad, h // 2 - d // 2, pad + d, h // 2 + d // 2,
+        c.create_oval(pad, h // 2 - dot // 2, pad + dot, h // 2 + dot // 2,
                       fill=self.COLORS.get(kind, P.info), outline="")
-        c.create_text(pad + d + S(10), h // 2 + 1, anchor="w", text=message,
+        c.create_text(pad + dot + gap, h // 2 + 1, anchor="w", text=message,
                       font=font, fill=P.text)
-        c.place(relx=0.5, rely=1.0, anchor="s", y=-S(18))
-        c.lift()
-
-        self._canvas = c
-        self._job = self.root.after(ms, self.hide)
+        c.place(relx=0.5, rely=1.0, anchor="s", y=-self._bottom_offset())
+        # Canvas.lift e o tag_raise dos itens e exige um argumento; para
+        # empilhar a JANELA e preciso chamar o Misc.lift explicitamente
+        tk.Misc.lift(c)
 
     def hide(self):
         if self._job is not None:
@@ -725,9 +762,10 @@ class Toast:
             except Exception:
                 pass
             self._job = None
-        if self._canvas is not None:
+        for c in self._live:
             try:
-                self._canvas.destroy()
+                c.place_forget()
+                c.destroy()
             except Exception:
                 pass
-            self._canvas = None
+        self._live = []

@@ -165,9 +165,9 @@ def describe_monitors():
         num = name.replace("\\\\.\\DISPLAY", "")
         if not num.isdigit():
             continue
+        # A resolução já aparece nos indicadores do topo; repetir aqui só
+        # fazia o rótulo estourar a largura do seletor e truncar.
         title = _monitor_name(name) or desc or "monitor"
-        mode = get_current_mode(num)
-        extra = " · %dx%d" % (mode["width"], mode["height"]) if mode else ""
         tag = " (principal)" if flags & DISPLAY_DEVICE_PRIMARY_DEVICE else ""
-        out.append((num, "%s — %s%s%s" % (num, title, extra, tag)))
+        out.append((num, "%s — %s%s" % (num, title, tag)))
     return out
